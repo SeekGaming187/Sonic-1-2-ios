@@ -1,0 +1,40 @@
+name: Build Sonic 1 & 2 iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Inspect Xcode project targets
+        run: xcodebuild -list -project "RSDKv4 ios.xcodeproj"
+
+      - name: Build iOS App
+        run: |
+          xcodebuild \
+            -project "RSDKv4 ios.xcodeproj" \
+            -alltargets \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package into unsigned IPA
+        run: |
+          mkdir -p Payload
+          find build -name "*.app" -exec cp -r {} Payload/ \;
+          zip -r SonicForeverAbsolute.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SonicForeverAbsolute-iOS
+          path: SonicForeverAbsolute.ipa
