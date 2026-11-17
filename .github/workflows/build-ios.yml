@@ -33,6 +33,13 @@ jobs:
           ref: v1.3.7
           path: vorbis
 
+      - name: Checkout tinyxml2
+        uses: actions/checkout@v4
+        with:
+          repository: leethomason/tinyxml2
+          ref: "10.0.0"
+          path: tinyxml2
+
       - name: Create iOS CMake Toolchain
         run: |
           cat << 'EOF' > ios.toolchain.cmake
@@ -87,15 +94,15 @@ jobs:
           void toggleFullScreen(void) {}
           EOF
 
-          CPP_FILES="$(find RSDKv4 -name "*.cpp") ios_cocoa_stub.cpp"
+          CPP_FILES="$(find RSDKv4 -name "*.cpp") tinyxml2/tinyxml2.cpp ios_cocoa_stub.cpp"
           C_FILES=$(find RSDKv4 -name "*.c")
 
           OBJ_FILES=""
           for f in $C_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
             xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -DRETRO_USE_HW_RENDER=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/ios-deps/include" \
+              -O2 -w -DRETRO_USE_HW_RENDER=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/tinyxml2" -I"$PWD/ios-deps/include" \
               -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
@@ -103,8 +110,8 @@ jobs:
           for f in $CPP_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
             xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -DRETRO_USE_HW_RENDER=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/ios-deps/include" \
+              -O2 -w -DRETRO_USE_HW_RENDER=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/tinyxml2" -I"$PWD/ios-deps/include" \
               -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
