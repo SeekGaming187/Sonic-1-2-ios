@@ -77,20 +77,26 @@ jobs:
           find vorbis/build -name "libvorbisfile.a" -exec cp {} ios-deps/lib/libvorbisfile.a \;
 
 
-      - name: Compile RSDKv4 Engine & Package IPA
+       - name: Compile RSDKv4 Engine & Package IPA
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p Payload/RSDKv4.app build_objs
 
-          CPP_FILES=$(find RSDKv4 -name "*.cpp")
+          # Create an iOS stub for macOS cocoaHelpers functions so it compiles & links cleanly
+          cat << 'EOF' > ios_cocoa_stub.cpp
+          void setupCocoaWindow(void) {}
+          void toggleFullScreen(void) {}
+          EOF
+
+          CPP_FILES="$(find RSDKv4 -name "*.cpp") ios_cocoa_stub.cpp"
           C_FILES=$(find RSDKv4 -name "*.c")
 
           OBJ_FILES=""
           for f in $C_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
             xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
+              -O2 -DRETRO_USE_HW_RENDER=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/ios-deps/include" \
               -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
@@ -98,8 +104,8 @@ jobs:
           for f in $CPP_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
             xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
+              -O2 -DRETRO_USE_HW_RENDER=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/ios-deps/include" \
               -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
@@ -116,6 +122,7 @@ jobs:
           cp -r dependencies/ios/Assets.xcassets/* Payload/RSDKv4.app/ 2>/dev/null || true
 
           zip -r SonicForeverAbsolute.ipa Payload
+
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
