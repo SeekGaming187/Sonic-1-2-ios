@@ -7,10 +7,31 @@ jobs:
   build-ios:
     runs-on: macos-15-intel
     steps:
-      - name: Checkout repository with submodules
+      - name: Checkout main repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Checkout SDL2
+        uses: actions/checkout@v4
+        with:
+          repository: libsdl-org/SDL
+          ref: release-2.30.10
+          path: SDL
+
+      - name: Checkout libogg
+        uses: actions/checkout@v4
+        with:
+          repository: xiph/ogg
+          ref: v1.3.5
+          path: ogg
+
+      - name: Checkout libvorbis
+        uses: actions/checkout@v4
+        with:
+          repository: xiph/vorbis
+          ref: v1.3.7
+          path: vorbis
 
       - name: Create iOS CMake Toolchain
         run: |
@@ -22,34 +43,24 @@ jobs:
           set(CMAKE_IOS_INSTALL_COMBINED NO)
           EOF
 
-
       - name: Build SDL2, libogg, and libvorbis for iOS
         run: |
           mkdir -p ios-deps/include/SDL2 ios-deps/lib
 
-          # 1. Build SDL2 for iOS arm64
-          git clone --depth 1 --branch release-2.30.10 https://github.com
           cmake -S SDL -B SDL/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
-            -DPLATFORM=OS64 \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
           cmake --build SDL/build --config Release -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
           cp SDL/include/*.h ios-deps/include/SDL2/
           find SDL/build -name "libSDL2*.a" -exec cp {} ios-deps/lib/libSDL2.a \;
 
-          # 2. Build libogg for iOS arm64
-          git clone --depth 1 --branch v1.3.5 https://github.com
           cmake -S ogg -B ogg/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
-            -DPLATFORM=OS64 \
             -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
           cmake --build ogg/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
 
-          # 3. Build libvorbis for iOS arm64
-          git clone --depth 1 --branch v1.3.7 https://github.com
           cmake -S vorbis -B vorbis/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
-            -DPLATFORM=OS64 \
             -DCMAKE_PREFIX_PATH="$PWD/ios-deps" \
             -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
           cmake --build vorbis/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
@@ -57,17 +68,14 @@ jobs:
       - name: Compile RSDKv4 Engine & Package IPA
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
-          mkdir -p Payload/RSDKv4.app
+          mkdir -p Payload/RSDKv4.app build_objs
 
-          # Find all C/C++ source files in RSDKv4 (excluding Windows/Android specific folders if any)
           CPP_FILES=$(find RSDKv4 -name "*.cpp")
           C_FILES=$(find RSDKv4 -name "*.c")
 
-          # Compile C files
           OBJ_FILES=""
           for f in $C_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
-            mkdir -p build_objs
             xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
               -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
               -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
@@ -75,10 +83,8 @@ jobs:
             OBJ_FILES="$OBJ_FILES $obj"
           done
 
-          # Compile C++ files
           for f in $CPP_FILES; do
             obj="build_objs/$(echo $f | tr '/' '_').o"
-            mkdir -p build_objs
             xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
               -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
               -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
@@ -86,7 +92,6 @@ jobs:
             OBJ_FILES="$OBJ_FILES $obj"
           done
 
-          # Link into iOS executable
           xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
             $OBJ_FILES \
             -L"$PWD/ios-deps/lib" -lSDL2 -lvorbisfile -lvorbis -logg -lz \
@@ -95,7 +100,6 @@ jobs:
             -framework GameController -framework CoreMotion -framework CoreHaptics -framework Metal \
             -o Payload/RSDKv4.app/RSDKv4
 
-          # Copy Info.plist and Icons from dependencies/ios if present
           cp dependencies/ios/Info.plist Payload/RSDKv4.app/Info.plist || true
           cp -r dependencies/ios/Assets.xcassets/* Payload/RSDKv4.app/ 2>/dev/null || true
 
