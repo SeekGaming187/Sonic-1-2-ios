@@ -12,9 +12,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Download iOS CMake Toolchain
+      - name: Create iOS CMake Toolchain
         run: |
-          curl -L https://githubusercontent.com -o ios.toolchain.cmake
+          cat << 'EOF' > ios.toolchain.cmake
+          set(CMAKE_SYSTEM_NAME iOS)
+          set(CMAKE_OSX_ARCHITECTURES arm64)
+          set(CMAKE_OSX_DEPLOYMENT_TARGET 13.0)
+          set(CMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH NO)
+          set(CMAKE_IOS_INSTALL_COMBINED NO)
+          EOF
+
 
       - name: Build SDL2, libogg, and libvorbis for iOS
         run: |
