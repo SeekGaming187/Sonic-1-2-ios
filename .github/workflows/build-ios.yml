@@ -12,8 +12,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Inspect Xcode project targets
-        run: xcodebuild -list -project "RSDKv4 ios.xcodeproj"
+      - name: Create placeholder Data.rsdk for Xcode
+        run: |
+          mkdir -p dependencies/ios
+          touch dependencies/ios/Data.rsdk
 
       - name: Build iOS App
         run: |
@@ -27,11 +29,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-
       - name: Package into unsigned IPA
         run: |
+          rm -f build/RSDKv4.app/Data.rsdk
           mkdir -p Payload
-          find build -name "*.app" -exec cp -r {} Payload/ \;
+          cp -r build/RSDKv4.app Payload/
           zip -r SonicForeverAbsolute.ipa Payload
 
       - name: Upload IPA Artifact
