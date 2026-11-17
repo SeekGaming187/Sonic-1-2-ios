@@ -12,28 +12,86 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Create placeholder Data.rsdk for Xcode
+      - name: Download iOS CMake Toolchain
         run: |
-          mkdir -p dependencies/ios
-          touch dependencies/ios/Data.rsdk
+          curl -L https://githubusercontent.com -o ios.toolchain.cmake
 
-      - name: Build iOS App
+      - name: Build SDL2, libogg, and libvorbis for iOS
         run: |
-          xcodebuild \
-            -project "RSDKv4 ios.xcodeproj" \
-            -alltargets \
-            -configuration Release \
-            -sdk iphoneos \
-            CONFIGURATION_BUILD_DIR="$PWD/build" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+          mkdir -p ios-deps/include/SDL2 ios-deps/lib
 
-      - name: Package into unsigned IPA
+          # 1. Build SDL2 for iOS arm64
+          git clone --depth 1 --branch release-2.30.10 https://github.com
+          cmake -S SDL -B SDL/build -G Xcode \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DPLATFORM=OS64 \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
+          cmake --build SDL/build --config Release -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+          cp SDL/include/*.h ios-deps/include/SDL2/
+          find SDL/build -name "libSDL2*.a" -exec cp {} ios-deps/lib/libSDL2.a \;
+
+          # 2. Build libogg for iOS arm64
+          git clone --depth 1 --branch v1.3.5 https://github.com
+          cmake -S ogg -B ogg/build -G Xcode \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DPLATFORM=OS64 \
+            -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
+          cmake --build ogg/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+
+          # 3. Build libvorbis for iOS arm64
+          git clone --depth 1 --branch v1.3.7 https://github.com
+          cmake -S vorbis -B vorbis/build -G Xcode \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DPLATFORM=OS64 \
+            -DCMAKE_PREFIX_PATH="$PWD/ios-deps" \
+            -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
+          cmake --build vorbis/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+
+      - name: Compile RSDKv4 Engine & Package IPA
         run: |
-          rm -f build/RSDKv4.app/Data.rsdk
-          mkdir -p Payload
-          cp -r build/RSDKv4.app Payload/
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          mkdir -p Payload/RSDKv4.app
+
+          # Find all C/C++ source files in RSDKv4 (excluding Windows/Android specific folders if any)
+          CPP_FILES=$(find RSDKv4 -name "*.cpp")
+          C_FILES=$(find RSDKv4 -name "*.c")
+
+          # Compile C files
+          OBJ_FILES=""
+          for f in $C_FILES; do
+            obj="build_objs/$(echo $f | tr '/' '_').o"
+            mkdir -p build_objs
+            xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
+              -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
+              -c "$f" -o "$obj"
+            OBJ_FILES="$OBJ_FILES $obj"
+          done
+
+          # Compile C++ files
+          for f in $CPP_FILES; do
+            obj="build_objs/$(echo $f | tr '/' '_').o"
+            mkdir -p build_objs
+            xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
+              -O2 -DRETRO_USE_HW_RENDER=1 -DRETRO_USING_SDL2=1 \
+              -I"$PWD/RSDKv4" -I"$PWD/ios-deps/include" \
+              -c "$f" -o "$obj"
+            OBJ_FILES="$OBJ_FILES $obj"
+          done
+
+          # Link into iOS executable
+          xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
+            $OBJ_FILES \
+            -L"$PWD/ios-deps/lib" -lSDL2 -lvorbisfile -lvorbis -logg -lz \
+            -framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
+            -framework OpenGLES -framework AudioToolbox -framework CoreAudio -framework AVFoundation \
+            -framework GameController -framework CoreMotion -framework CoreHaptics -framework Metal \
+            -o Payload/RSDKv4.app/RSDKv4
+
+          # Copy Info.plist and Icons from dependencies/ios if present
+          cp dependencies/ios/Info.plist Payload/RSDKv4.app/Info.plist || true
+          cp -r dependencies/ios/Assets.xcassets/* Payload/RSDKv4.app/ 2>/dev/null || true
+
           zip -r SonicForeverAbsolute.ipa Payload
 
       - name: Upload IPA Artifact
