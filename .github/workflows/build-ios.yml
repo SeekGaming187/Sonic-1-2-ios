@@ -42,7 +42,7 @@ jobs:
           set(CMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH NO)
           set(CMAKE_IOS_INSTALL_COMBINED NO)
           EOF
-          
+
       - name: Build SDL2, libogg, and libvorbis for iOS
         run: |
           mkdir -p ios-deps/include/SDL2 ios-deps/include/ogg ios-deps/lib
@@ -56,7 +56,7 @@ jobs:
           cp SDL/include/*.h ios-deps/include/SDL2/
           find SDL/build -name "libSDL2*.a" -exec cp {} ios-deps/lib/libSDL2.a \;
 
-          # 2. libogg (manual copy to avoid Xcode Release-iphoneos install path quirks)
+          # 2. libogg
           cmake -S ogg -B ogg/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -65,7 +65,7 @@ jobs:
           cp ogg/build/include/ogg/*.h ios-deps/include/ogg/ 2>/dev/null || true
           find ogg/build -name "libogg.a" -exec cp {} ios-deps/lib/libogg.a \;
 
-          # 3. libvorbis (explicitly pass OGG_INCLUDE_DIR and OGG_LIBRARY)
+          # 3. libvorbis
           cmake -S vorbis -B vorbis/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
@@ -76,13 +76,12 @@ jobs:
           find vorbis/build -name "libvorbis.a" -exec cp {} ios-deps/lib/libvorbis.a \;
           find vorbis/build -name "libvorbisfile.a" -exec cp {} ios-deps/lib/libvorbisfile.a \;
 
-
-       - name: Compile RSDKv4 Engine & Package IPA
+      - name: Compile RSDKv4 Engine & Package IPA
         run: |
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p Payload/RSDKv4.app build_objs
 
-          # Create an iOS stub for macOS cocoaHelpers functions so it compiles & links cleanly
+          # Create an iOS stub for macOS cocoaHelpers functions
           cat << 'EOF' > ios_cocoa_stub.cpp
           void setupCocoaWindow(void) {}
           void toggleFullScreen(void) {}
@@ -122,7 +121,6 @@ jobs:
           cp -r dependencies/ios/Assets.xcassets/* Payload/RSDKv4.app/ 2>/dev/null || true
 
           zip -r SonicForeverAbsolute.ipa Payload
-
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
