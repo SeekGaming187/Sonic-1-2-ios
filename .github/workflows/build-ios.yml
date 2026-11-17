@@ -49,21 +49,24 @@ jobs:
 
           cmake -S SDL -B SDL/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
-          cmake --build SDL/build --config Release -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+          cmake --build SDL/build --config Release --parallel 4 -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
           cp SDL/include/*.h ios-deps/include/SDL2/
           find SDL/build -name "libSDL2*.a" -exec cp {} ios-deps/lib/libSDL2.a \;
 
           cmake -S ogg -B ogg/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
-          cmake --build ogg/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+          cmake --build ogg/build --config Release --parallel 4 --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
 
           cmake -S vorbis -B vorbis/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCMAKE_PREFIX_PATH="$PWD/ios-deps" \
             -DCMAKE_INSTALL_PREFIX="$PWD/ios-deps"
-          cmake --build vorbis/build --config Release --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+          cmake --build vorbis/build --config Release --parallel 4 --target install -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
 
       - name: Compile RSDKv4 Engine & Package IPA
         run: |
