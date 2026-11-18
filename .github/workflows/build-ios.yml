@@ -1,8 +1,9 @@
+Build ios · YML
 name: Build Sonic 1 & 2 iOS IPA
-
+ 
 on:
   workflow_dispatch:
-
+ 
 jobs:
   build-ios:
     runs-on: macos-15-intel
@@ -11,35 +12,42 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
+ 
       - name: Checkout SDL2
         uses: actions/checkout@v4
         with:
           repository: libsdl-org/SDL
           ref: release-2.30.10
           path: SDL
-
+ 
       - name: Checkout libogg
         uses: actions/checkout@v4
         with:
           repository: xiph/ogg
           ref: v1.3.5
           path: ogg
-
+ 
       - name: Checkout libvorbis
         uses: actions/checkout@v4
         with:
           repository: xiph/vorbis
           ref: v1.3.7
           path: vorbis
-
+ 
+      - name: Checkout libtheora
+        uses: actions/checkout@v4
+        with:
+          repository: xiph/theora
+          ref: v1.1.1
+          path: theora
+ 
       - name: Checkout tinyxml2
         uses: actions/checkout@v4
         with:
           repository: leethomason/tinyxml2
           ref: "10.0.0"
           path: tinyxml2
-
+ 
       - name: Create iOS CMake Toolchain
         run: |
           cat << 'EOF' > ios.toolchain.cmake
@@ -49,11 +57,12 @@ jobs:
           set(CMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH NO)
           set(CMAKE_IOS_INSTALL_COMBINED NO)
           EOF
-
+ 
       - name: Build SDL2, libogg, and libvorbis for iOS
         run: |
+          set -e
           mkdir -p ios-deps/include/SDL2 ios-deps/include/ogg ios-deps/lib
-
+ 
           # 1. SDL2
           cmake -S SDL -B SDL/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
@@ -61,8 +70,9 @@ jobs:
             -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
           cmake --build SDL/build --config Release --parallel 4 -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
           cp SDL/include/*.h ios-deps/include/SDL2/
-          find SDL/build -name "libSDL2*.a" -exec cp {} ios-deps/lib/libSDL2.a \;
-
+          # exact name only, so libSDL2main.a can't overwrite it
+          find SDL/build -name "libSDL2.a" -exec cp {} ios-deps/lib/libSDL2.a \;
+ 
           # 2. libogg
           cmake -S ogg -B ogg/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
@@ -71,7 +81,7 @@ jobs:
           cp ogg/include/ogg/*.h ios-deps/include/ogg/
           cp ogg/build/include/ogg/*.h ios-deps/include/ogg/ 2>/dev/null || true
           find ogg/build -name "libogg.a" -exec cp {} ios-deps/lib/libogg.a \;
-
+ 
           # 3. libvorbis
           cmake -S vorbis -B vorbis/build -G Xcode \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/ios.toolchain.cmake" \
@@ -82,55 +92,115 @@ jobs:
           cp -r vorbis/include/vorbis ios-deps/include/
           find vorbis/build -name "libvorbis.a" -exec cp {} ios-deps/lib/libvorbis.a \;
           find vorbis/build -name "libvorbisfile.a" -exec cp {} ios-deps/lib/libvorbisfile.a \;
-
+ 
+          echo "=== ios-deps/lib ==="
+          ls -la ios-deps/lib
+ 
       - name: Compile RSDKv4 Engine & Package IPA
         run: |
+          set -e
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p Payload/RSDKv4.app build_objs
-
-          # Create an iOS stub for macOS cocoaHelpers functions
+ 
+          # iOS stub for macOS cocoaHelpers functions
           cat << 'EOF' > ios_cocoa_stub.cpp
           void setupCocoaWindow(void) {}
           void toggleFullScreen(void) {}
           EOF
-
+ 
+          # ---- Locate TheoraPlay (bundled with the RSDKv4 repo) ----
+          THEORAPLAY_H=$(find . -name theoraplay.h -not -path "./build_objs/*" | head -n1)
+          if [ -z "$THEORAPLAY_H" ]; then
+            echo "ERROR: theoraplay.h not found anywhere in the repo. Is a submodule missing?"
+            exit 1
+          fi
+          THEORAPLAY_DIR=$(dirname "$THEORAPLAY_H")
+          THEORAPLAY_C=$(find "$THEORAPLAY_DIR" -name theoraplay.c | head -n1)
+          echo "TheoraPlay dir: $THEORAPLAY_DIR"
+          echo "TheoraPlay src: $THEORAPLAY_C"
+ 
+          INCLUDES="-I$PWD/RSDKv4 -I$PWD/dependencies/mac -I$PWD/tinyxml2 \
+            -I$PWD/$THEORAPLAY_DIR -I$PWD/theora/include -I$PWD/theora/lib \
+            -I$PWD/ios-deps/include -I$PWD/ios-deps/include/SDL2"
+ 
+          COMMON="-arch arm64 -isysroot $SDK_PATH -miphoneos-version-min=13.0 -O2 -w"
+ 
+          OBJ_FILES=""
+ 
+          # ---- libtheora (decoder only, compiled directly) ----
+          THEORA_SRCS="apiwrapper bitpack decapiwrapper decinfo decode dequant fragment huffdec idct info internal quant state"
+          for name in $THEORA_SRCS; do
+            f="theora/lib/$name.c"
+            echo ">>> Compiling $f"
+            obj="build_objs/theora_$name.o"
+            xcrun --sdk iphoneos clang $COMMON $INCLUDES -c "$f" -o "$obj"
+            OBJ_FILES="$OBJ_FILES $obj"
+          done
+ 
+          # ---- TheoraPlay ----
+          echo ">>> Compiling $THEORAPLAY_C"
+          xcrun --sdk iphoneos clang $COMMON $INCLUDES -c "$THEORAPLAY_C" -o build_objs/theoraplay.o
+          OBJ_FILES="$OBJ_FILES build_objs/theoraplay.o"
+ 
+          # ---- Engine sources ----
           CPP_FILES="$(find RSDKv4 -name "*.cpp") tinyxml2/tinyxml2.cpp ios_cocoa_stub.cpp"
           C_FILES=$(find RSDKv4 -name "*.c")
-
-          OBJ_FILES=""
+ 
           for f in $C_FILES; do
+            echo ">>> Compiling $f"
             obj="build_objs/$(echo $f | tr '/' '_').o"
-            xcrun --sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -w -DRETRO_USE_HW_RENDER=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/tinyxml2" -I"$PWD/ios-deps/include" \
-              -c "$f" -o "$obj"
+            xcrun --sdk iphoneos clang $COMMON $INCLUDES -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
-
+ 
           for f in $CPP_FILES; do
+            echo ">>> Compiling $f"
             obj="build_objs/$(echo $f | tr '/' '_').o"
-            xcrun --sdk iphoneos clang++ -std=c++17 -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
-              -O2 -w -DRETRO_USE_HW_RENDER=1 \
-              -I"$PWD/RSDKv4" -I"$PWD/dependencies/mac" -I"$PWD/tinyxml2" -I"$PWD/ios-deps/include" \
-              -c "$f" -o "$obj"
+            xcrun --sdk iphoneos clang++ -std=c++17 $COMMON $INCLUDES -c "$f" -o "$obj"
             OBJ_FILES="$OBJ_FILES $obj"
           done
-
+ 
+          # ---- Link ----
           xcrun --sdk iphoneos clang++ -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=13.0 \
             $OBJ_FILES \
-            -L"$PWD/ios-deps/lib" -lSDL2 -lvorbisfile -lvorbis -logg -lz \
+            -L"$PWD/ios-deps/lib" -lSDL2 -lvorbisfile -lvorbis -logg -lz -liconv \
             -framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
             -framework OpenGLES -framework AudioToolbox -framework CoreAudio -framework AVFoundation \
             -framework GameController -framework CoreMotion -framework CoreHaptics -framework Metal \
+            -framework CoreBluetooth -framework ImageIO -framework MobileCoreServices \
             -o Payload/RSDKv4.app/RSDKv4
-
-          cp dependencies/ios/Info.plist Payload/RSDKv4.app/Info.plist || true
+ 
+          # ---- Package ----
+          if [ -f dependencies/ios/Info.plist ]; then
+            cp dependencies/ios/Info.plist Payload/RSDKv4.app/Info.plist
+          else
+            echo "WARNING: dependencies/ios/Info.plist not found - writing a minimal one"
+            cat << 'EOF' > Payload/RSDKv4.app/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>RSDKv4</string>
+            <key>CFBundleIdentifier</key><string>com.seekgaming187.sonic12</string>
+            <key>CFBundleName</key><string>Sonic 1 &amp; 2</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>MinimumOSVersion</key><string>13.0</string>
+            <key>UIRequiresFullScreen</key><true/>
+            <key>UISupportedInterfaceOrientations</key>
+            <array><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+          </dict>
+          </plist>
+          EOF
+          fi
           cp -r dependencies/ios/Assets.xcassets/* Payload/RSDKv4.app/ 2>/dev/null || true
-
+ 
           zip -r SonicForeverAbsolute.ipa Payload
-
+ 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SonicForeverAbsolute-iOS
           path: SonicForeverAbsolute.ipa
+ 
