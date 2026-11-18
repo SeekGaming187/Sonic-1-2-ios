@@ -1,4 +1,3 @@
-Build ios · YML
 name: Build Sonic 1 & 2 iOS IPA
  
 on:
