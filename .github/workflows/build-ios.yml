@@ -47,6 +47,13 @@ jobs:
           ref: asio-1-30-2
           path: asio
  
+      - name: Checkout stb (single-header libs, fallback for stb_image.h)
+        uses: actions/checkout@v4
+        with:
+          repository: nothings/stb
+          ref: master
+          path: stb
+ 
       - name: Checkout tinyxml2
         uses: actions/checkout@v4
         with:
@@ -131,7 +138,14 @@ jobs:
             RSDK_INCS="$RSDK_INCS -I$PWD/$d"
           done
  
-          INCLUDES="$RSDK_INCS -I$PWD/dependencies/mac -I$PWD/tinyxml2 \
+          # Use any stb_image.h bundled in the repo first (fallback: ./stb checkout, added below)
+          STB_INCS=""
+          for h in $(find . -name stb_image.h -not -path "./build_objs/*" -not -path "./stb/*"); do
+            STB_INCS="$STB_INCS -I$PWD/$(dirname $h)"
+          done
+          echo "Bundled stb include dirs: ${STB_INCS:-none (using ./stb checkout)}"
+ 
+          INCLUDES="$RSDK_INCS $STB_INCS -I$PWD/stb -I$PWD/dependencies/mac -I$PWD/tinyxml2 \
             -I$PWD/$THEORAPLAY_DIR -I$PWD/theora/include -I$PWD/theora/lib \
             -I$PWD/ios-deps/include -I$PWD/ios-deps/include/SDL2 \
             -I$PWD/asio/asio/include"
